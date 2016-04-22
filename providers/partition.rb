@@ -69,11 +69,12 @@ end
 
 action :format do
   number = @new_resource.disk_number
+  letter = @new_resource.letter
   fs = @new_resource.fs
   updated = false
 
   unless formatted?(number)
-    format(number, fs)
+    (obsolete_windows?) ? format_obsolete(letter, fs) : format(number, fs)
     sleep(@new_resource.sleep)
     updated = true
   end
@@ -171,6 +172,16 @@ def format(disk, fs)
   check_for_errors(cmd, 'DiskPart successfully formatted the volume', true)
 end
 
+def format_obsolete(letter, fs)
+  Chef::Log.debug("Obsolete formatting disk #{letter} with file system #{fs.to_s}")
+
+  format_cmd = "format.com #{letter}: /FS:#{fs.to_s} /Q /V:"
+  cmd = Mixlib::ShellOut.new(format_cmd, { returns:[0], input:"\nY\n" })
+  cmd.run_command
+  Chef::Application.fatal!("Non-allowed exit code, running format command:#{format_cmd}") if cmd.error?
+  check_for_errors(cmd, 'Format complete.', true)
+end
+
 def assign(disk, letter)
   volume_number = new_resource.volume_number ||
     get_volume_info(disk)[:volume_number]
@@ -240,4 +251,10 @@ def get_drive_info(letter)
   matched_info = cmd.stdout.match(/Volume\s(?<volume>\d){1,3}\s*#{letter}(\s\w\s|\s*)\w*\s*\w*\s*(?<size>\w*)\s(?<magnitude>MB|GB)/)
 
   matched_info.nil? ? {volume: nil, size: nil} : extract_info(matched_info)
+end
+
+def obsolete_windows?
+  require 'chef/win32/version'
+  windows_version = Chef::ReservedNames::Win32::Version.new
+  windows_version.windows_server_2003_r2? || windows_version.windows_server_2003?
 end
